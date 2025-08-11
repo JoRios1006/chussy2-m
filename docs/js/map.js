@@ -1,78 +1,96 @@
-import { GAME_CONFIG } from './utils.js';
-import { player } from './player.js';
-
 export const MAP = [
-    [1,1,1,1,1,1,1,1,1,1,1,1],
-    [1,1,0,0,0,1,1,0,0,0,1,1],
-    [1,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,1,1,0,0,0,0,1],
-    [1,1,0,0,1,1,1,1,0,0,1,1],
-    [1,1,0,0,1,1,1,1,0,0,1,1],
-    [1,0,0,0,0,1,1,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,1],
-    [1,1,0,0,0,1,1,0,0,0,1,1],
-    [1,1,1,1,1,1,1,1,1,1,1,1]
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1],
+  [1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1],
+  [1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1],
+  [1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
 ];
 
 // Pre-calculate step size for better performance
-const RAY_STEP = 0.1;
-const MAX_DISTANCE = 20;
-
-export function castRay(rayAngle, playerX, playerY) {
-    // Pre-calculate ray direction once
-    const rayDirX = Math.cos(rayAngle);
-    const rayDirY = Math.sin(rayAngle);
-    
-    // Pre-calculate step increments
-    const stepX = rayDirX * RAY_STEP;
-    const stepY = rayDirY * RAY_STEP;
-    
-    let rayX = playerX;
-    let rayY = playerY;
-    let distance = 0;
-    
-    // Cache map bounds for faster bounds checking
-    const mapHeight = MAP.length;
-    const mapWidth = MAP[0].length;
-    
-    while (distance < MAX_DISTANCE) {
-        rayX += stepX;
-        rayY += stepY;
-        distance += RAY_STEP;
-        
-        // Use bitwise OR 0 for faster integer conversion
-        const mapX = rayX | 0;
-        const mapY = rayY | 0;
-        
-        // Fast bounds check before array access
-        if (mapY >= 0 && mapY < mapHeight && mapX >= 0 && mapX < mapWidth && MAP[mapY][mapX] === 1) {
-            // Fix fisheye by using perpendicular distance
-            const perpDistance = distance * Math.cos(rayAngle - player.angle);
-            return perpDistance;
-        }
-    }
-    // Fix fisheye for max distance case
-    return distance * Math.cos(rayAngle - player.angle);
-}
-
-// Cache map dimensions for faster collision checks
+const RAY_STEP = 1;
+const MAX_DISTANCE = 200;
 const MAP_HEIGHT = MAP.length;
 const MAP_WIDTH = MAP[0].length;
+const isWallAt = (gridX, gridY) =>
+  gridY >= 0 &&
+  gridY < MAP_HEIGHT &&
+  gridX >= 0 &&
+  gridX < MAP_WIDTH &&
+  MAP[gridY][gridX] === 1;
+export function castRay(
+  rayAngleRadians,
+  playerWorldPositionX,
+  playerWorldPositionY,
+  playerFacingAngleRadians,
+) {
+  // Calculate ray direction vector components
+  const rayDirectionVectorX = Math.cos(rayAngleRadians);
+  const rayDirectionVectorY = Math.sin(rayAngleRadians);
 
-export function checkWallCollision(x, y, radius = 0.2) {
-    // Use bitwise OR 0 for faster integer conversion
-    const mapY = y | 0;
-    const mapX = x | 0;
-    
-    // Check entity corners based on radius
-    for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-            const checkX = (x + dx * radius) | 0;
-            const checkY = (y + dy * radius) | 0;
-            if (checkY >= 0 && checkY < MAP_HEIGHT && checkX >= 0 && checkX < MAP_WIDTH && MAP[checkY][checkX] === 1) return true;
-        }
+  // Precompute fisheye correction factor
+  const fisheyeCorrectionFactor = Math.cos(
+    rayAngleRadians - playerFacingAngleRadians,
+  );
+
+  // Initialize ray at player's position
+  let currentRayPositionX = playerWorldPositionX;
+  let currentRayPositionY = playerWorldPositionY;
+  let accumulatedRayDistance = 0;
+
+  // Traverse ray path until max distance
+  while (accumulatedRayDistance < MAX_DISTANCE) {
+    // Advance ray position by whole grid units
+    currentRayPositionX += rayDirectionVectorX;
+    currentRayPositionY += rayDirectionVectorY;
+
+    // Update distance traveled (Pythagorean approximation)
+    accumulatedRayDistance = Math.hypot(
+      currentRayPositionX - playerWorldPositionX,
+      currentRayPositionY - playerWorldPositionY,
+    );
+
+    // Calculate current grid cell WITHOUT flooring
+    const currentMapCellX = Math.trunc(currentRayPositionX);
+    const currentMapCellY = Math.trunc(currentRayPositionY);
+
+    // Check if ray has exited map bounds
+    if (
+      currentMapCellY < 0 ||
+      currentMapCellY >= MAP_HEIGHT ||
+      currentMapCellX < 0 ||
+      currentMapCellX >= MAP_WIDTH
+    ) {
+      return accumulatedRayDistance * fisheyeCorrectionFactor;
     }
-    return false;
+
+    // Check for wall collision
+    if (MAP[currentMapCellY][currentMapCellX] === 1) {
+      return accumulatedRayDistance * fisheyeCorrectionFactor;
+    }
+  }
+
+  // Return max distance with fisheye correction
+  return accumulatedRayDistance * fisheyeCorrectionFactor;
 }
+const OFFSETS = [
+  [-1, -1],
+  [0, -1],
+  [1, -1],
+  [-1, 0],
+  [0, 0],
+  [1, 0],
+  [-1, 1],
+  [0, 1],
+  [1, 1],
+];
+export const checkWallCollision = (x, y, radius = 0.2) =>
+  OFFSETS.some(([dx, dy]) =>
+    isWallAt(Math.floor(x + dx * radius), Math.floor(y + dy * radius)),
+  );
