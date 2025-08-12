@@ -6,12 +6,12 @@
  * - We avoid renaming exported APIs or object property keys (e.g., enemy.x) to keep inter-module contracts stable.
  * - Variable names are made verbose within local scopes for readability; behavior and logic are unchanged.
  */
-import { GAME_CONFIG } from './utils.js';
-import { player } from './player.js';
-import { checkWallCollision, castRay } from './map.js';
-import { calculateDistance, spriteCache, worldToScreen } from './utils.js';
-import { findPath } from './pathfinding.js';
-import { handlePlayerDeath } from './game.js';
+import { map, find, range, pipe, times } from "ramda";
+import { GAME_CONFIG } from "./utils.js";
+import { checkWallCollision, castRay } from "./map.js";
+import { spriteCache, worldToScreen } from "./utils.js";
+import { findPath } from "./pathfinding.js";
+import { handlePlayerDeath } from "./game.js";
 // --- Spawn helpers -----------------------------------------------------------
 // Hard-coded cells near the corners of the map; offsets add variation
 const SAFE_SPAWN_POINTS = [
@@ -31,17 +31,19 @@ const createEnemyAt = (x, y) => ({
   x,
   y,
   health: 100, // Enemy starts at full health
-  type: 'ENEMY_1', // Sprite/behavior identifier
+  type: "ENEMY_1", // Sprite/behavior identifier
   lastMove: Date.now(), // Timestamp of last movement (ms)
   lastPathUpdate: 0, // Last pathfinding recompute time (ms)
   pathIndex: 0, // Index of the current waypoint in the path
   path: null,
 });
+
 export function spawnEnemy() {
-  const spawnCandidate = Array.from({ length: 8 }, () => computeSpawnCandidate()).find(
-    ({ x, y }) => !checkWallCollision(x, y, 0.3),
-  );
-  return spawnCandidate ? createEnemyAt(spawnCandidate.x, spawnCandidate.y) : undefined;
+  const { Enemy_x_Coordinate, Enemy_y_Coordinate } = pipe(
+    times(() => computeSpawnCandidate(), 8), // Generate 8 candidates
+    find(({ x, y }) => !checkWallCollision(x, y, 0.3)), // Pick the first valid candidate
+  ) || { x: 1.5, y: 1.5 }; // Fallback to a safe default if all candidates fail
+  return createEnemyAt(Enemy_x_Coordinate, Enemy_y_Coordinate); //
 }
 
 /**
@@ -51,31 +53,33 @@ export function spawnEnemy() {
  * @param {Object} state - Global game state.
  * @param {Object} player - Player entity (position, angle, health).
  */
-export function updateEnemies(state, player) {
-  if (!state.gameOver && state.enemies && Array.isArray(state.enemies)) {
+const calculateDistanceEnemyToPlayer = (
+  { enemyXcord, enemyYcord },
+  { playerXcord, playerYcord },
+) => Math.hypot(enemyXcord - playerXcord, enemyYcord - playerYcord);
+
+export function updateEnemies({ enemies, gameOver }, player) {
+  if (!gameOver && enemies && Array.isArray(enemies)) {
     // Sort enemies back-to-front by distance so nearer sprites draw last (proper painter's algorithm)
-    state.enemies.sort((a, b) => {
-      if (!a || !b) return 0;
-      const distanceA = Math.sqrt(Math.pow(a.x - player.x, 2) + Math.pow(a.y - player.y, 2));
-      const distanceB = Math.sqrt(Math.pow(b.x - player.x, 2) + Math.pow(b.y - player.y, 2));
-      return distanceB - distanceA; // Sort furthest to closest
+    enemies.sort((currentEnemy, nextEnemy) => {
+      return !currentEnemy || !nextEnemy
+        ? 0
+        : calculateDistanceEnemyToPlayer(nextEnemy, player) -
+            calculateDistanceEnemyToPlayer(currentEnemy, player);
     });
 
-    for (let enemyIndex = state.enemies.length - 1; enemyIndex >= 0; enemyIndex--) {
-      const enemy = state.enemies[enemyIndex];
+    for (
+      let enemyIndex = enemies.length - 1; // Iterate backwards to allow safe removal
+      enemyIndex >= 0;
+      enemyIndex--
+    ) {
+      const enemy = enemies[enemyIndex];
       if (!enemy) continue;
 
-      // Vector from enemy to player
-      const deltaXToPlayer = player.x - enemy.x;
-      const deltaYToPlayer = player.y - enemy.y;
-      const distanceToPlayer = Math.sqrt(
-        deltaXToPlayer * deltaXToPlayer + deltaYToPlayer * deltaYToPlayer,
-      );
-
       // If an enemy gets very close to the player, inflict damage and despawn the enemy
-      if (distanceToPlayer < 0.5) {
+      if (calculateDistanceEnemyToPlayer(enemy, player) < 0.5) {
         player.health = Math.max(0, player.health - 25); // Reduce health by 25
-        state.enemies.splice(enemyIndex, 1);
+        enemies.splice(enemyIndex, 1);
         if (player.health <= 0) {
           handlePlayerDeath();
         }
@@ -92,12 +96,17 @@ export function updateEnemies(state, player) {
       }
 
       // Step toward the current waypoint along the computed path
-      if (enemy.path && enemy.path.length > 0 && enemy.pathIndex < enemy.path.length) {
+      if (
+        enemy.path &&
+        enemy.path.length > 0 &&
+        enemy.pathIndex < enemy.path.length
+      ) {
         const currentWaypoint = enemy.path[enemy.pathIndex];
         const deltaToWaypointX = currentWaypoint.x - enemy.x;
         const deltaToWaypointY = currentWaypoint.y - enemy.y;
         const distanceToWaypoint = Math.sqrt(
-          deltaToWaypointX * deltaToWaypointX + deltaToWaypointY * deltaToWaypointY,
+          deltaToWaypointX * deltaToWaypointX +
+            deltaToWaypointY * deltaToWaypointY,
         );
 
         if (distanceToWaypoint < 0.1) {
@@ -105,8 +114,10 @@ export function updateEnemies(state, player) {
         } else {
           // Smoother movement with proper collision radius
           const movementSpeed = 0.003; // World units per frame (tuned for fairness)
-          const proposedX = enemy.x + (deltaToWaypointX / distanceToWaypoint) * movementSpeed;
-          const proposedY = enemy.y + (deltaToWaypointY / distanceToWaypoint) * movementSpeed;
+          const proposedX =
+            enemy.x + (deltaToWaypointX / distanceToWaypoint) * movementSpeed;
+          const proposedY =
+            enemy.y + (deltaToWaypointY / distanceToWaypoint) * movementSpeed;
 
           // Check collision with entity radius
           if (!checkWallCollision(proposedX, proposedY, 0.3)) {
@@ -137,7 +148,8 @@ export function updateEnemies(state, player) {
  * @param {HTMLCanvasElement} canvas - Target canvas (for width/height).
  */
 export function renderEnemy(ctx, enemy, player, canvas) {
-  if (!enemy || typeof enemy.x !== 'number' || typeof enemy.y !== 'number') return;
+  if (!enemy || typeof enemy.x !== "number" || typeof enemy.y !== "number")
+    return;
 
   const { screenX, screenY, size, distance } = worldToScreen(
     enemy.x,
@@ -159,7 +171,12 @@ export function renderEnemy(ctx, enemy, player, canvas) {
   if (Math.abs(relativeAngleToView) > GAME_CONFIG.FOV / 2) return;
 
   // Raycast to the nearest wall; if the wall is closer than the enemy, the enemy is occluded
-  const distanceToNearestWall = castRay(angleToEnemy, player.x, player.y, player.angle);
+  const distanceToNearestWall = castRay(
+    angleToEnemy,
+    player.x,
+    player.y,
+    player.angle,
+  );
   if (distance > distanceToNearestWall) return;
 
   // Skip if the projected sprite would be off-screen (with a small margin)
@@ -186,9 +203,14 @@ export function renderEnemy(ctx, enemy, player, canvas) {
   const healthBarHeight = size / 10; // Thin bar
   const healthPercent = enemy.health / 100; // 0..1 range
 
-  ctx.fillStyle = '#ff0000';
-  ctx.fillRect(screenX - healthBarWidth / 2, screenY - size / 3, healthBarWidth, healthBarHeight);
-  ctx.fillStyle = '#00ff00';
+  ctx.fillStyle = "#ff0000";
+  ctx.fillRect(
+    screenX - healthBarWidth / 2,
+    screenY - size / 3,
+    healthBarWidth,
+    healthBarHeight,
+  );
+  ctx.fillStyle = "#00ff00";
   ctx.fillRect(
     screenX - healthBarWidth / 2,
     screenY - size / 3,
