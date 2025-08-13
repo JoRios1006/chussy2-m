@@ -1,10 +1,20 @@
-import { GAME_CONFIG, loadSprite, calculateDistance, worldToScreen, spriteCache } from './utils.js';
-import { player, updatePlayerMovement, shoot } from './player.js';
-import { updateEnemies, renderEnemy, spawnEnemy } from './enemy.js';
-import { updateCollectibles, renderCollectibles, spawnCheese } from './collectibles.js';
-import { drawWalls, drawHUD, drawArms, drawMinimap } from './render.js';
-import { setupInputHandlers, keys, updateAutoplay } from './input.js';
-import { checkWallCollision } from './map.js';
+import {
+  GAME_CONFIG,
+  loadSprite,
+  calculateDistance,
+  worldToScreen,
+  spriteCache,
+} from "./utils.js";
+import { player, updatePlayerMovement, shoot } from "./player.js";
+import { updateEnemies, renderEnemy, spawnEnemy } from "./enemy.js";
+import {
+  updateCollectibles,
+  renderCollectibles,
+  spawnCheese,
+} from "./collectibles.js";
+import { drawWalls, drawHUD, drawArms, drawMinimap } from "./render.js";
+import { setupInputHandlers, keys, updateAutoplay } from "./input.js";
+import { isCollidingWithWall } from "./map.js";
 
 // Canvas contexts
 let canvas = null;
@@ -15,21 +25,21 @@ let minimapCtx = null;
 // Initialize canvases, contexts, and webcam
 function initializeCanvases() {
   try {
-    canvas = document.getElementById('gameCanvas');
-    if (!canvas) throw new Error('Canvas initialization failed');
-    ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Context initialization failed');
+    canvas = document.getElementById("gameCanvas");
+    if (!canvas) throw new Error("Canvas initialization failed");
+    ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Context initialization failed");
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    minimapCanvas = document.getElementById('minimapCanvas');
-    if (!minimapCanvas) throw new Error('Minimap canvas initialization failed');
-    minimapCtx = minimapCanvas.getContext('2d');
-    if (!minimapCtx) throw new Error('Minimap context initialization failed');
+    minimapCanvas = document.getElementById("minimapCanvas");
+    if (!minimapCanvas) throw new Error("Minimap canvas initialization failed");
+    minimapCtx = minimapCanvas.getContext("2d");
+    if (!minimapCtx) throw new Error("Minimap context initialization failed");
     minimapCanvas.width = 200;
     minimapCanvas.height = 200;
   } catch (error) {
-    console.error('Canvas initialization error:', error);
+    console.error("Canvas initialization error:", error);
     throw error;
   }
 }
@@ -61,14 +71,16 @@ export const state = {
     pingInterval: 300000,
   },
   sounds: {
-    ping: new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU'),
+    ping: new Audio(
+      "data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU",
+    ),
   },
 };
 
 export function handlePlayerDeath() {
-  const popup = document.getElementById('deathPopup');
+  const popup = document.getElementById("deathPopup");
   if (popup) {
-    popup.style.display = 'block';
+    popup.style.display = "block";
   }
   state.gameOver = true;
 }
@@ -81,9 +93,9 @@ export function restartGame() {
 
   state.enemies = [];
 
-  const popup = document.getElementById('deathPopup');
+  const popup = document.getElementById("deathPopup");
   if (popup) {
-    popup.style.display = 'none';
+    popup.style.display = "none";
   }
 
   state.gameOver = false;
@@ -101,7 +113,7 @@ export function gameLoop(timestamp) {
   }
   lastFrameTime = timestamp;
 
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Cache array checks
@@ -129,7 +141,7 @@ export function gameLoop(timestamp) {
       projectile.y += Math.sin(projectile.angle) * projectile.speed;
 
       // Check wall collision
-      if (checkWallCollision(projectile.x, projectile.y)) {
+      if (isCollidingWithWall(projectile.x, projectile.y)) {
         // Draw wall impact effect
         const { screenX, screenY, size } = worldToScreen(
           projectile.x,
@@ -141,7 +153,7 @@ export function gameLoop(timestamp) {
         );
         ctx.save();
         ctx.globalAlpha = 0.5;
-        ctx.fillStyle = '#ffff00';
+        ctx.fillStyle = "#ffff00";
         ctx.beginPath();
         ctx.arc(screenX, screenY, size * 0.8, 0, Math.PI * 2);
         ctx.fill();
@@ -153,7 +165,12 @@ export function gameLoop(timestamp) {
       if (state.enemies) {
         for (let i = state.enemies.length - 1; i >= 0; i--) {
           const enemy = state.enemies[i];
-          const dist = calculateDistance(projectile.x, projectile.y, enemy.x, enemy.y);
+          const dist = calculateDistance(
+            projectile.x,
+            projectile.y,
+            enemy.x,
+            enemy.y,
+          );
           if (dist < 0.5) {
             enemy.health -= projectile.damage;
             // Draw enemy hit impact effect
@@ -167,7 +184,7 @@ export function gameLoop(timestamp) {
             );
             ctx.save();
             ctx.globalAlpha = 0.5;
-            ctx.fillStyle = '#ff0000';
+            ctx.fillStyle = "#ff0000";
             ctx.beginPath();
             ctx.arc(screenX, screenY, size, 0, Math.PI * 2);
             ctx.fill();
@@ -176,7 +193,10 @@ export function gameLoop(timestamp) {
             if (enemy.health <= 0) {
               // Drop ammo when enemy dies
               const ammoAmount = Math.floor(Math.random() * 5) + 3; // 3-7 bullets
-              state.bullets = Math.min(state.maxBullets, state.bullets + ammoAmount);
+              state.bullets = Math.min(
+                state.maxBullets,
+                state.bullets + ammoAmount,
+              );
               state.enemies.splice(i, 1);
             }
             return false; // Remove bullet on hit
@@ -202,7 +222,7 @@ export function gameLoop(timestamp) {
       // Only render if in view
       if (screenX >= 0 && screenX <= canvas.width) {
         ctx.save();
-        const sprite = spriteCache['BULLET'];
+        const sprite = spriteCache["BULLET"];
         if (sprite) {
           const width = Math.max(12, size * 0.6); // Visible yellow bullets per ThePrimeagen
           const height = width;
@@ -210,7 +230,7 @@ export function gameLoop(timestamp) {
           // Draw smoke tracer
           ctx.save();
           ctx.globalAlpha = 0.3;
-          ctx.fillStyle = '#888888';
+          ctx.fillStyle = "#888888";
           ctx.beginPath();
           ctx.moveTo(screenX, screenY);
           ctx.lineTo(
@@ -229,7 +249,7 @@ export function gameLoop(timestamp) {
           // Draw smoke tracer
           ctx.save();
           ctx.globalAlpha = 0.3;
-          ctx.fillStyle = '#888888';
+          ctx.fillStyle = "#888888";
           ctx.beginPath();
           ctx.moveTo(screenX, screenY);
           ctx.lineTo(
@@ -246,7 +266,7 @@ export function gameLoop(timestamp) {
 
           // Draw yellow bullet
           ctx.save();
-          ctx.fillStyle = 'yellow';
+          ctx.fillStyle = "yellow";
           ctx.beginPath();
           ctx.arc(screenX, screenY, width / 2, 0, Math.PI * 2);
           ctx.fill();
@@ -274,7 +294,11 @@ export function gameLoop(timestamp) {
   updateCollectibles(state, player);
   // Update autoplay with shooting
   updateAutoplay(state, player);
-  if (state.autoplay.enabled && state.autoplay.targetEnemy && state.bullets > 0) {
+  if (
+    state.autoplay.enabled &&
+    state.autoplay.targetEnemy &&
+    state.bullets > 0
+  ) {
     shoot(state);
   }
 
@@ -314,15 +338,19 @@ setInterval(() => {
 async function initGame() {
   try {
     const spritePromises = [
-      ...Object.keys(GAME_CONFIG.SPRITES.ENEMIES).map((spriteName) => loadSprite(spriteName)),
-      loadSprite('BULLET'),
-      ...Object.keys(GAME_CONFIG.SPRITES.COLLECTIBLES).map((spriteName) => loadSprite(spriteName)),
+      ...Object.keys(GAME_CONFIG.SPRITES.ENEMIES).map((spriteName) =>
+        loadSprite(spriteName),
+      ),
+      loadSprite("BULLET"),
+      ...Object.keys(GAME_CONFIG.SPRITES.COLLECTIBLES).map((spriteName) =>
+        loadSprite(spriteName),
+      ),
     ];
     await Promise.all(spritePromises);
-    console.log('All sprites loaded successfully');
+    console.log("All sprites loaded successfully");
     gameLoop();
   } catch (error) {
-    console.error('Failed to load sprites:', error);
+    console.error("Failed to load sprites:", error);
   }
 }
 

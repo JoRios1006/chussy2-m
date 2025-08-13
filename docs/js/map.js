@@ -90,7 +90,7 @@ const OFFSETS = [
   [0, 1],
   [1, 1],
 ];
-export const checkWallCollision = (x, y, radius = 0.2) =>
+export const isCollidingWithWall = (x, y, radius = 0.2) =>
   OFFSETS.some(([dx, dy]) =>
     isWallAt(Math.floor(x + dx * radius), Math.floor(y + dy * radius)),
   );
