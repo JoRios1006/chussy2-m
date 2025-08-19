@@ -14,27 +14,29 @@ const MAX_LEN = PF.MAX_PATH_LENGTH ?? Infinity;
 
 export function findPath(startX, startY, endX, endY) {
   return R.pipe(
-    convertPixelCoordinatesToTileIFNeeded(startX, startY, endX, endY),
+    () => convertPixelCoordinatesToTileIFNeeded(startX, startY, endX, endY),
     validateStartandEndPoints,
-    runAstarIFvalid,
+    R.cond([
+      // If stage.kind is "ok", then run the A* search
+      [R.propEq("kind", "ok"), runAstar],
+      // For any other case ("invalid", "done"), just pass the stage along
+      [R.T, R.identity],
+    ]),
     processFinalResult,
   )(); // Return path or null
 }
 function convertPixelCoordinatesToTileIFNeeded(startX, startY, endX, endY) {
   return {
-    sx: Number.isInteger(startX)
-      ? startX
-      : Math.floor(startX / GAME_CONFIG.TILE_SIZE), // Snap start X
-    sy: Number.isInteger(startY)
-      ? startY
-      : Math.floor(startY / GAME_CONFIG.TILE_SIZE), // Snap start Y
-    gx: Number.isInteger(endX)
-      ? endX
-      : Math.floor(endX / GAME_CONFIG.TILE_SIZE), // Snap end X
-    gy: Number.isInteger(endY)
-      ? endY
-      : Math.floor(endY / GAME_CONFIG.TILE_SIZE),
+    sx: snapToGrid(startX),
+    sy: snapToGrid(startY),
+    gx: snapToGrid(endX),
+    gy: snapToGrid(endY),
   };
+}
+function snapToGrid(pixelCoord) {
+  return Number.isInteger(pixelCoord)
+    ? pixelCoord
+    : Math.floor(pixelCoord / GAME_CONFIG.TILE_SIZE);
 }
 function validateStartandEndPoints(ctx) {
   return !walkable(ctx.sx, ctx.sy) || !walkable(ctx.gx, ctx.gy)
@@ -43,30 +45,27 @@ function validateStartandEndPoints(ctx) {
       ? { kind: "done", path: [] } // Already at destination
       : { kind: "ok", ctx };
 } // Proceed with search
-function runAstarIFvalid(stage) {
-  return stage.kind !== "ok"
-    ? stage // Return early if invalid or done
-    : (() => {
-        const { sx, sy, gx, gy } = stage.ctx; // Extract coordinates
-        const startK = key(sx, sy); // Start key
-        const goal = { x: gx, y: gy, k: key(gx, gy) }; // Goal object
-        // Initial search state
-        const init = {
-          open: [{ x: sx, y: sy, f: H(sx, sy, gx, gy) }], // Start node
-          gScore: { [startK]: 0 }, // Start g-score
-          fScore: { [startK]: H(sx, sy, gx, gy) }, // Start f-score
-          parents: { [startK]: null }, // Start has no parent
-          closed: {}, // Empty closed set
-          currentK: undefined, // No current node yet
-        };
-        // Run A* until termination condition
-        return {
-          kind: "ran",
-          startK,
-          goalK: goal.k,
-          endState: run(init, goal), // Final search state
-        };
-      })();
+// This function's only job is to run the A* search.
+function runAstar(stage) {
+  const { sx, sy, gx, gy } = stage.ctx; // No longer needs a check
+  const startK = key(sx, sy);
+  const goal = { x: gx, y: gy, k: key(gx, gy) };
+
+  const init = {
+    open: [{ x: sx, y: sy, f: H(sx, sy, gx, gy) }],
+    gScore: { [startK]: 0 },
+    fScore: { [startK]: H(sx, sy, gx, gy) },
+    parents: { [startK]: null },
+    closed: {},
+    currentK: undefined,
+  };
+
+  return {
+    kind: "ran",
+    startK,
+    goalK: goal.k,
+    endState: run(init, goal),
+  };
 }
 function run(state, goal) {
   return R.until(
@@ -193,15 +192,14 @@ function processFinalResult(stage) {
 // Final path processing after search completes
 function finalize(startK, goalK) {
   return (state) =>
-    state.currentK === goalK // Did we reach goal?
+    state.currentK === goalK
       ? R.pipe(
-          () => pathFromParents(state.parents, startK, goalK), // Build path
-
-          // Apply MAX_LEN check to final path length
-          (path) => (path && path.length <= MAX_LEN ? path : null),
+          () => pathFromParents(state.parents, startK, goalK),
+          (path) =>
+            get(state.gScore, goalK, Infinity) <= MAX_LEN ? path : null,
         )()
       : null;
-} // No path found
+}
 // Reconstruct path from parent pointers
 function pathFromParents(parents, startK, goalK) {
   // Build full path as array of keys
@@ -219,9 +217,9 @@ function pathFromParents(parents, startK, goalK) {
 }
 function build(k, acc, parents, startK) {
   return k === startK
-    ? R.prepend(k, acc) // Start reached, begin path
-    : build(get(parents, k, null), R.prepend(k, acc));
-} // Move to parent
+    ? R.prepend(k, acc)
+    : build(get(parents, k, null), R.prepend(k, acc), parents, startK);
+}
 /* ---------------- helpers  ---------------- */
 // Generate unique string key from coordinates
 function key(x, y) {
